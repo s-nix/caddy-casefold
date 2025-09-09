@@ -13,6 +13,7 @@ Out of the box Caddy performs case-sensitive path matching. When migrating from 
 * Global case-insensitive behavior via one directive
 * Three modes: `lower` (default), Unicode `fold`, or filesystem canonical `fs`
 * Optional exclusion globs for paths that must remain case-sensitive
+* Optional `verbose` flag for detailed debug logging of rewrites/skips
 * Adds `X-Original-URI` header preserving the pre-transform path
 
 ## Installation
@@ -41,6 +42,8 @@ example.com {
 				# one or more exclude patterns (path.Match globs)
 				exclude /api/CaseSensitive/*
 				exclude /media/*.ZIP
+				# enable debug logging for this middleware instance
+				verbose
 		}
 
 		handle /Hello {
@@ -80,6 +83,7 @@ example.com {
 * Exclusions use Go's `path.Match` (wildcards `*`, `?`, character classes). They are evaluated against the full path (leading slash included).
 * `fold` mode uses Unicode case folding (ß → ss, Greek sigma handling, etc.). This may slightly increase allocations vs simple lowercase.
 * `fs` mode walks the filesystem for each incoming path to map segments to their actual on-disk casing (use sparingly; involves directory reads per request; consider caching behind a CDN). Requires `root`.
+* `verbose` adds debug-level logs (set global logging level to `debug` to see them) showing skips, transformations, and canonicalization results.
 * Only the path component is transformed; query string is untouched.
 * If downstream logic depends on the original casing, read the `X-Original-URI` header.
 

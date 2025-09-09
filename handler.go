@@ -53,7 +53,11 @@ type Casefold struct {
 	// Patterns are matched against the leading slash form of the path.
 	Exclude []string `json:"exclude,omitempty"`
 
-	fold caser `json:"-"`
+	// Verbose enables debug logging of decisions (skips, transformations, fs lookups).
+	Verbose bool `json:"verbose,omitempty"`
+
+	fold caser       `json:"-"`
+	log  *zap.Logger `json:"-"`
 }
 
 // caser abstracts the Fold or Lower implementation we pick at provision time.
@@ -69,6 +73,7 @@ func (Casefold) CaddyModule() caddy.ModuleInfo { //nolint:revive
 
 // Provision sets up the module.
 func (c *Casefold) Provision(ctx caddy.Context) error { //nolint:revive
+	c.log = ctx.Logger()
 	switch strings.ToLower(strings.TrimSpace(c.Mode)) {
 	case "", "lower":
 		c.fold = lowerCaser{}
@@ -88,8 +93,11 @@ func (c *Casefold) Provision(ctx caddy.Context) error { //nolint:revive
 			}
 		}
 	default:
-		ctx.Logger().Warn("unknown casefold mode; defaulting to lower", zap.String("mode", c.Mode))
+		c.log.Warn("unknown casefold mode; defaulting to lower", zap.String("mode", c.Mode))
 		c.fold = lowerCaser{}
+	}
+	if c.Verbose {
+		c.log.Debug("casefold provisioned", zap.String("mode", strings.ToLower(strings.TrimSpace(c.Mode))), zap.String("root", c.Root), zap.Int("exclude_count", len(c.Exclude)))
 	}
 	return nil
 }
@@ -100,7 +108,10 @@ func (c *Casefold) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyh
 	if orig == "" || orig == "/" {
 		return next.ServeHTTP(w, r)
 	}
-	if c.skip(orig) {
+	if pat := c.matchExclude(orig); pat != "" {
+		if c.Verbose && c.log != nil {
+			c.log.Debug("casefold skip (excluded)", zap.String("path", orig), zap.String("pattern", pat))
+		}
 		return next.ServeHTTP(w, r)
 	}
 
@@ -119,10 +130,15 @@ func (c *Casefold) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyh
 	}
 
 	if transformed != orig {
+		if c.Verbose && c.log != nil {
+			c.log.Debug("casefold transformed", zap.String("from", orig), zap.String("to", transformed), zap.String("mode", mode))
+		}
 		r.Header.Set("X-Original-URI", orig)
 		w.Header().Set("X-Original-URI", orig)
 		r.URL.Path = transformed
 		r.RequestURI = transformed
+	} else if c.Verbose && c.log != nil {
+		c.log.Debug("casefold no-op", zap.String("path", orig), zap.String("mode", mode))
 	}
 	return next.ServeHTTP(w, r)
 }
@@ -193,16 +209,19 @@ func (c *Casefold) canonicalFS(p string) (string, bool) {
 }
 
 // skip returns true if the path matches an exclude pattern.
-func (c *Casefold) skip(p string) bool {
+func (c *Casefold) skip(p string) bool { return c.matchExclude(p) != "" } // backwards compat (unused internally now)
+
+// matchExclude returns the first matching exclusion pattern or empty string.
+func (c *Casefold) matchExclude(p string) string {
 	for _, gl := range c.Exclude {
 		if gl == "" {
 			continue
 		}
 		if ok, _ := path.Match(gl, p); ok {
-			return true
+			return gl
 		}
 	}
-	return false
+	return ""
 }
 
 // lowerCaser provides a simple Unicode lower mapping using strings.ToLower.
@@ -255,6 +274,8 @@ func parseCasefold(h httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error) 
 				for h.NextArg() {
 					c.Exclude = append(c.Exclude, h.Val())
 				}
+			case "verbose":
+				c.Verbose = true
 			default:
 				return nil, h.Errf("unrecognized subdirective %q", token)
 			}
