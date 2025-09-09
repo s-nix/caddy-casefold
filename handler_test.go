@@ -3,6 +3,8 @@ package casefold
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/caddyserver/caddy/v2"
@@ -62,5 +64,30 @@ func TestCasefoldFoldMode(t *testing.T) {
 	}
 	if got := rr.Header().Get("X-Final-Path"); got != "/strasse" {
 		t.Fatalf("expected folded path /strasse, got %s", got)
+	}
+}
+
+func TestCasefoldFSMode(t *testing.T) {
+	root := t.TempDir()
+	// create nested structure: scripts/MyScript.bat
+	if err := os.MkdirAll(filepath.Join(root, "scripts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	filePath := filepath.Join(root, "scripts", "MyScript.bat")
+	if err := os.WriteFile(filePath, []byte("echo test"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &Casefold{Mode: "fs", Root: root}
+	if err := c.Provision(caddy.Context{}); err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://example.test/scripts/myscript.bat", nil)
+	if err := c.ServeHTTP(rr, req, recordHandler{t}); err != nil {
+		t.Fatal(err)
+	}
+	if got := rr.Header().Get("X-Final-Path"); got != "/scripts/MyScript.bat" {
+		t.Fatalf("expected canonical FS path /scripts/MyScript.bat, got %s", got)
 	}
 }
