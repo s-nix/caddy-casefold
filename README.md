@@ -20,7 +20,7 @@ Out of the box Caddy performs case-sensitive path matching. When migrating from 
 
 Use `xcaddy` (recommended):
 
-```powershell
+```shell
 xcaddy build --with github.com/s-nix/caddy-casefold@latest
 ```
 
