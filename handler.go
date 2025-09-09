@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/caddyserver/caddy/v2"
+	"github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	"go.uber.org/zap"
 	"golang.org/x/text/cases"
@@ -213,4 +214,51 @@ func (lowerCaser) String(s string) string { return strings.ToLower(s) }
 var _ caddy.Module = (*Casefold)(nil)
 var _ caddyhttp.MiddlewareHandler = (*Casefold)(nil)
 
-func init() { caddy.RegisterModule(Casefold{}) }
+func init() {
+	caddy.RegisterModule(Casefold{})
+	httpcaddyfile.RegisterHandlerDirective("casefold", parseCasefold)
+}
+
+// parseCasefold implements the Caddyfile parsing logic for the 'casefold' directive.
+// Syntax:
+//
+//	casefold {
+//	    mode <lower|fold|fs>
+//	    root <path>         # only for fs mode
+//	    exclude <pattern> [<pattern>...]
+//	    exclude <pattern>
+//	}
+//
+// Multiple 'exclude' lines are allowed; each can take one or more patterns.
+func parseCasefold(h httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error) { //nolint:revive
+	c := new(Casefold)
+	for h.Next() { // 'casefold'
+		for h.NextBlock(0) {
+			token := h.Val()
+			switch token {
+			case "mode":
+				if !h.NextArg() {
+					return nil, h.ArgErr()
+				}
+				c.Mode = h.Val()
+			case "root":
+				if !h.NextArg() {
+					return nil, h.ArgErr()
+				}
+				c.Root = h.Val()
+			case "exclude":
+				if !h.NextArg() {
+					return nil, h.ArgErr()
+				}
+				c.Exclude = append(c.Exclude, h.Val())
+				// consume any additional patterns on same line
+				for h.NextArg() {
+					c.Exclude = append(c.Exclude, h.Val())
+				}
+			default:
+				return nil, h.Errf("unrecognized subdirective %q", token)
+			}
+		}
+	}
+	return c, nil
+}
